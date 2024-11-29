@@ -8,6 +8,9 @@ public class MeshInsidePoint : MonoBehaviour
     public float yOffset = 1.0f; // 顶点Y轴抬高的偏移量
     public Transform targetModel; // 需要限制运动的目标模型（Cube）
     public float movementSpeed = 5f; // 控制Cube移动速度
+    public bool debugDrawMesh = true; // 是否绘制扩展后的Mesh
+
+    private bool _lastInside = true; // 上一帧Cube是否在Mesh内部
 
     private void Start()
     {
@@ -40,10 +43,19 @@ public class MeshInsidePoint : MonoBehaviour
         {
             if (!IsPointInsideMesh(corner, _elevatedMesh))
             {
-                Debug.Log($"Corner {corner} is outside the mesh");
                 isInside = false;
                 break;
             }
+        }
+
+        // 优化：如果状态与上一帧一致，避免重复判断
+        if (_lastInside == isInside)
+        {
+            if (isInside)
+            {
+                targetModel.position = targetPosition;
+            }
+            return;
         }
 
         // 如果Cube完全在Mesh内部，则允许移动
@@ -55,6 +67,8 @@ public class MeshInsidePoint : MonoBehaviour
         {
             Debug.Log("Cube position is restricted due to boundary constraints.");
         }
+
+        _lastInside = isInside; // 更新上一帧状态
     }
 
     private Mesh CreateElevatedMesh(Mesh originalMesh, float yOffset)
@@ -184,5 +198,26 @@ public class MeshInsidePoint : MonoBehaviour
             new Vector3(position.x + size.x / 2, position.y + size.y / 2, position.z + size.z / 2), // 右上后
             new Vector3(position.x - size.x / 2, position.y + size.y / 2, position.z + size.z / 2)  // 左上后
         };
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!debugDrawMesh || _elevatedMesh == null) return;
+
+        Gizmos.color = Color.green;
+
+        var vertices = _elevatedMesh.vertices;
+        var triangles = _elevatedMesh.triangles;
+
+        for (int i = 0; i < triangles.Length; i += 3)
+        {
+            Vector3 v1 = transform.TransformPoint(vertices[triangles[i]]);
+            Vector3 v2 = transform.TransformPoint(vertices[triangles[i + 1]]);
+            Vector3 v3 = transform.TransformPoint(vertices[triangles[i + 2]]);
+
+            Gizmos.DrawLine(v1, v2);
+            Gizmos.DrawLine(v2, v3);
+            Gizmos.DrawLine(v3, v1);
+        }
     }
 }
