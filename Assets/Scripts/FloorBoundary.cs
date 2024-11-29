@@ -4,38 +4,21 @@ using UnityEngine;
 
 public class FloorBoundary : MonoBehaviour
 {
-    private readonly List<Vector2> _boundaryVertices = new();
+    private List<Vector2> _boundaryVertices = new(); // 地板的边界顶点
 
-    public Transform targetModel;
+    public bool debugDrawBoundary = true; // 是否绘制边界
 
     private void Start()
     {
-        var meshFilter = GetComponentInChildren<MeshFilter>();
+        var meshFilter = GetComponent<MeshFilter>();
         if (meshFilter == null)
         {
-            Debug.LogError("The floor object needs to mount the MeshFilter component");
+            Debug.LogError("地板对象需要挂载MeshFilter组件！");
             return;
         }
 
         ExtractBoundary(meshFilter.mesh);
-        Debug.Log("Boundary vertex count: " + _boundaryVertices.Count);
-    }
-
-    void Update()
-    {
-        if (targetModel != null)
-        {
-            Vector3 targetPosition = targetModel.position;
-            Vector2 targetPosition2D = new Vector2(targetPosition.x, targetPosition.z);
-
-            // 判断目标模型是否在边界内
-            if (!IsPointInPolygon(_boundaryVertices, targetPosition2D))
-            {
-                // 如果目标超出边界，限制其位置
-                Vector3 nearestPosition = GetNearestPointInPolygon(_boundaryVertices, targetPosition2D);
-                targetModel.position = new Vector3(nearestPosition.x, targetPosition.y, nearestPosition.y);
-            }
-        }
+        Debug.Log("地板边界点数量: " + _boundaryVertices.Count);
     }
 
     // 提取地板边界顶点
@@ -43,9 +26,11 @@ public class FloorBoundary : MonoBehaviour
     {
         var vertices = mesh.vertices;
         var triangles = mesh.triangles;
+
+        // 用于记录每条边的引用次数
         var edgeCounts = new Dictionary<Edge, int>();
 
-        // Traverse all triangles, recording the number of side references
+        // 遍历所有三角形
         for (var i = 0; i < triangles.Length; i += 3)
         {
             int[] face = { triangles[i], triangles[i + 1], triangles[i + 2] };
@@ -60,85 +45,66 @@ public class FloorBoundary : MonoBehaviour
             }
         }
 
-        // Find an edge that is only referenced once
-        var boundaryVertexIndices = new HashSet<int>();
+        // 找到只被引用一次的边，确定边界顶点
+        var boundaryEdges = new List<Edge>();
         foreach (var edge in edgeCounts)
         {
-            if (edge.Value == 1)
-            {
-                boundaryVertexIndices.Add(edge.Key.Start);
-                boundaryVertexIndices.Add(edge.Key.End);
-            }
+            if (edge.Value == 1) boundaryEdges.Add(edge.Key);
         }
 
-        // Convert to 2D vertices of the XZ plane
-        foreach (var index in boundaryVertexIndices)
-        {
-            var vertex = transform.TransformPoint(vertices[index]);
-            _boundaryVertices.Add(new Vector2(vertex.x, vertex.z));
-        }
+        // 按顺序连接边界边，形成有序的边界顶点
+        _boundaryVertices = OrderBoundaryEdges(boundaryEdges, vertices);
     }
 
-    // Determine whether a point is inside a polygon (ray method)
-    private static bool IsPointInPolygon(List<Vector2> polygon, Vector2 point)
+    // 根据边界边连接成完整的多边形路径
+    private List<Vector2> OrderBoundaryEdges(List<Edge> edges, Vector3[] vertices)
     {
-        var intersections = 0;
-        for (var i = 0; i < polygon.Count; i++)
-        {
-            var v1 = polygon[i];
-            var v2 = polygon[(i + 1) % polygon.Count];
+        var orderedVertices = new List<Vector2>();
 
-            // Whether the checkpoint is in the Y range of the line segment
-            if ((point.y > Mathf.Min(v1.y, v2.y) && point.y <= Mathf.Max(v1.y, v2.y)) && point.x <= Mathf.Max(v1.x, v2.x))
-            {
-                // Calculate the point at which the ray intersects the edge
-                var xIntersection = (point.y - v1.y) * (v2.x - v1.x) / (v2.y - v1.y) + v1.x;
-                if (point.x <= xIntersection)
-                {
-                    intersections++;
-                }
-            }
+        // 从第一条边开始
+        var currentEdge = edges[0];
+        edges.RemoveAt(0);
+
+        // 添加起点
+        var startVertex = currentEdge.Start;
+        var endVertex = currentEdge.End;
+        orderedVertices.Add(new Vector2(vertices[startVertex].x, vertices[startVertex].z));
+        orderedVertices.Add(new Vector2(vertices[endVertex].x, vertices[endVertex].z));
+
+        // 依次找到连接的边
+        while (edges.Count > 0)
+        {
+            var nextEdgeIndex = edges.FindIndex(e => e.Start == endVertex || e.End == endVertex);
+            if (nextEdgeIndex == -1) break;
+
+            var nextEdge = edges[nextEdgeIndex];
+            edges.RemoveAt(nextEdgeIndex);
+
+            // 添加顶点
+            endVertex = nextEdge.Start == endVertex ? nextEdge.End : nextEdge.Start;
+            orderedVertices.Add(new Vector2(vertices[endVertex].x, vertices[endVertex].z));
         }
 
-        // If the number of intersections is odd, the points are inside the polygon
-        return (intersections % 2 != 0);
+        return orderedVertices;
     }
 
-    // Gets the closest point in the polygon
-    private Vector3 GetNearestPointInPolygon(List<Vector2> polygon, Vector2 point)
+    // 在场景中绘制边界线
+    private void OnDrawGizmos()
     {
-        var nearestPoint = point;
-        var minDistance = float.MaxValue;
+        if (!debugDrawBoundary || _boundaryVertices.Count < 2) return;
 
-        for (var i = 0; i < polygon.Count; i++)
+        Gizmos.color = Color.green;
+        for (var i = 0; i < _boundaryVertices.Count; i++)
         {
-            var v1 = polygon[i];
-            var v2 = polygon[(i + 1) % polygon.Count];
+            Vector3 from = new Vector3(_boundaryVertices[i].x, transform.position.y, _boundaryVertices[i].y);
+            Vector3 to = new Vector3(_boundaryVertices[(i + 1) % _boundaryVertices.Count].x, transform.position.y,
+                _boundaryVertices[(i + 1) % _boundaryVertices.Count].y);
 
-            // Calculate the nearest point from a point to a line segment
-            var closestPoint = GetClosestPointOnLineSegment(v1, v2, point);
-            var distance = Vector2.Distance(point, closestPoint);
-
-            if (distance < minDistance)
-            {
-                minDistance = distance;
-                nearestPoint = closestPoint;
-            }
+            Gizmos.DrawLine(from, to);
         }
-
-        return new Vector3(nearestPoint.x, 0, nearestPoint.y);
     }
 
-    // Gets the nearest point from the point to the line segment
-    private static Vector2 GetClosestPointOnLineSegment(Vector2 a, Vector2 b, Vector2 point)
-    {
-        var ab = b - a;
-        var t = Vector2.Dot(point - a, ab) / ab.sqrMagnitude;
-        t = Mathf.Clamp01(t);
-        return a + t * ab;
-    }
-
-    // The structure of the edge
+    // 边的结构体
     private readonly struct Edge : IEquatable<Edge>
     {
         public readonly int Start;
@@ -146,18 +112,13 @@ public class FloorBoundary : MonoBehaviour
 
         public Edge(int start, int end)
         {
-            Start = Mathf.Min(start, end);
+            Start = Mathf.Min(start, end); // 确保边的方向一致
             End = Mathf.Max(start, end);
         }
 
         public override bool Equals(object obj)
         {
-            if (obj is Edge other)
-            {
-                return Start == other.Start && End == other.End;
-            }
-
-            return false;
+            return obj is Edge other && Equals(other);
         }
 
         public override int GetHashCode()
