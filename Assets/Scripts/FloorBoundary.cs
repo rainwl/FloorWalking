@@ -4,8 +4,10 @@ using UnityEngine;
 
 public class FloorBoundary : MonoBehaviour
 {
-    private List<Vector2> _boundaryVertices = new(); // 地板的边界顶点
+    private List<Vector2> _boundaryVertices = new(); // 地板的边界点
 
+    public Transform targetModel; // 需要限制运动的模型
+    public float movementSpeed = 5f; // Cube的移动速度
     public bool debugDrawBoundary = true; // 是否绘制边界
 
     private void Start()
@@ -21,6 +23,60 @@ public class FloorBoundary : MonoBehaviour
         Debug.Log("地板边界点数量: " + _boundaryVertices.Count);
     }
 
+    private void Update()
+    {
+        if (targetModel == null) return;
+
+        // 获取输入方向
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
+
+        // 如果没有输入，则不进行移动
+        if (Mathf.Approximately(horizontal, 0) && Mathf.Approximately(vertical, 0)) return;
+
+        // 计算预期的移动矢量
+        Vector3 movement = new Vector3(horizontal, 0, vertical) * movementSpeed * Time.deltaTime;
+        Vector3 targetPosition = targetModel.position + movement;
+
+        // 初始化合法的运动矢量
+        Vector3 adjustedMovement = movement;
+
+        // 分别检测X方向和Z方向的越界情况
+        // 检测X方向
+        if (!CanMoveInDirection(targetModel.position, new Vector3(movement.x, 0, 0)))
+        {
+            adjustedMovement.x = 0; // 如果X方向越界，禁止X方向运动
+        }
+
+        // 检测Z方向
+        if (!CanMoveInDirection(targetModel.position, new Vector3(0, 0, movement.z)))
+        {
+            adjustedMovement.z = 0; // 如果Z方向越界，禁止Z方向运动
+        }
+
+        // 更新Cube的位置
+        targetModel.position += adjustedMovement;
+    }
+    private bool CanMoveInDirection(Vector3 currentPosition, Vector3 movement)
+    {
+        // 计算预期位置
+        Vector3 targetPosition = currentPosition + movement;
+
+        // 获取Cube在预期位置的四个顶点
+        Vector3[] cubeCorners = GetCubeCornersXZ(targetModel, targetPosition);
+
+        // 检查是否有任意顶点越界
+        foreach (var corner in cubeCorners)
+        {
+            Vector2 corner2D = new Vector2(corner.x, corner.z);
+            if (!IsPointInPolygon(_boundaryVertices, corner2D))
+            {
+                return false; // 如果任意顶点越界，返回false
+            }
+        }
+
+        return true; // 如果所有顶点都在边界内，返回true
+    }
     // 提取地板边界顶点
     private void ExtractBoundary(Mesh mesh)
     {
@@ -88,6 +144,44 @@ public class FloorBoundary : MonoBehaviour
         return orderedVertices;
     }
 
+    // 判断点是否在多边形内（射线法）
+    private static bool IsPointInPolygon(List<Vector2> polygon, Vector2 point)
+    {
+        var intersections = 0;
+        for (var i = 0; i < polygon.Count; i++)
+        {
+            var v1 = polygon[i];
+            var v2 = polygon[(i + 1) % polygon.Count];
+
+            if ((point.y > Mathf.Min(v1.y, v2.y) && point.y <= Mathf.Max(v1.y, v2.y)) && point.x <= Mathf.Max(v1.x, v2.x))
+            {
+                var xIntersection = (point.y - v1.y) * (v2.x - v1.x) / (v2.y - v1.y) + v1.x;
+                if (point.x <= xIntersection)
+                {
+                    intersections++;
+                }
+            }
+        }
+
+        return (intersections % 2 != 0);
+    }
+
+    // 获取Cube在XZ平面上指定位置的四个顶点
+    private Vector3[] GetCubeCornersXZ(Transform cube, Vector3 position)
+    {
+        var bounds = cube.GetComponent<Renderer>().bounds;
+        var size = bounds.size;
+        var center = position;
+
+        return new Vector3[]
+        {
+            new Vector3(center.x - size.x / 2, 0, center.z - size.z / 2), // 左下角
+            new Vector3(center.x + size.x / 2, 0, center.z - size.z / 2), // 右下角
+            new Vector3(center.x + size.x / 2, 0, center.z + size.z / 2), // 右上角
+            new Vector3(center.x - size.x / 2, 0, center.z + size.z / 2) // 左上角
+        };
+    }
+
     // 在场景中绘制边界线
     private void OnDrawGizmos()
     {
@@ -112,7 +206,7 @@ public class FloorBoundary : MonoBehaviour
 
         public Edge(int start, int end)
         {
-            Start = Mathf.Min(start, end); // 确保边的方向一致
+            Start = Mathf.Min(start, end);
             End = Mathf.Max(start, end);
         }
 
