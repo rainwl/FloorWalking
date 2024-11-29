@@ -14,3 +14,7 @@ UserSettings/
 *.csproj
 
 *.sln
+
+.idea/
+
+obj/
